@@ -17,7 +17,7 @@ Queue* create_queue() {
     Queue* queue = (Queue*) malloc(sizeof(Queue));
 
     if(queue == NULL) {
-        printf("Memory Allocation Encountered with an Error!");
+        printf("Memory Allocation Encountered with an Error!\n");
         return NULL;
     }
     
@@ -36,7 +36,7 @@ void enqueue(Queue* q, char* path) {
     Node* new_node = (Node*) malloc(sizeof(Node));
 
     if(new_node == NULL) {
-        printf("Memory Allocation Encountered with an Error!");
+        printf("Memory Allocation Encountered with an Error!\n");
         return;
     }
 
@@ -52,6 +52,27 @@ void enqueue(Queue* q, char* path) {
     q->size++;
 }
 
+char* dequeue(Queue* q) {
+    if(empty(q)){
+        printf("Can not Modify Queue Because Queue is Empty!\n");
+        return NULL;
+    }
+    Node* temp_node = q->head;
+    if(q->size == 1) {
+        q->head = q->tail = NULL;
+    }else {
+        q->head = q->head->next;
+    }
+    
+    q->size--;
+    char* file_path = temp_node->file_path;
+
+    free(temp_node);
+
+    return file_path;
+
+}
+
 int main() {
 
     printf("Creating a Queue\n");
@@ -62,6 +83,12 @@ int main() {
     printf("Add an Element into Queue\n");
     enqueue(queue, "Abolfazl-Amani");
 
+    printf("Add an Element into Queue\n");
+    enqueue(queue, "Hasan-Amani");
 
+    printf("Remove an Element in Queue\n");
+    dequeue(queue);
+
+    printf("Size: %d\n", queue->size);
     return 0;
 }
