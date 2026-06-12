@@ -69,7 +69,7 @@ void enqueue(Queue* q, char* path) {
 char* dequeue(Queue* q) {
     pthread_mutex_lock(&q->mutex_lock);
 
-    while(emtpy(q)) pthread_cond_wait(&q->cond_variable, &q->mutex_lock);
+    while(empty(q)) pthread_cond_wait(&q->cond_variable, &q->mutex_lock);
 
     Node* temp_node = q->head;
     if(q->size == 1) {
@@ -85,6 +85,31 @@ char* dequeue(Queue* q) {
     pthread_mutex_unlock(&q->mutex_lock);
 
     return file_path;
+}
+
+void free_queue(Queue* q) {
+    if(q == NULL) return;
+
+    pthread_mutex_lock(&q->mutex_lock);
+
+    Node* current_node = q->head;
+    while(current_node != NULL) {
+        Node* next_node = current_node->next;
+
+        free(current_node->file_path);
+        free(current_node);
+
+        current_node = next_node;
+    }
+
+    q->head = q->tail = NULL;
+    q->size = 0;
+
+    pthread_mutex_unlock(&q->mutex_lock);
+
+    pthread_mutex_destroy(&q->mutex_lock);
+    pthread_cond_destroy(&q->cond_variable);
+    free(q);
 }
 
 int main() {
@@ -105,8 +130,7 @@ int main() {
 
     printf("Size: %d\n", queue->size);
 
-    pthread_mutex_destroy(&queue->mutex_lock);
-    pthread_cond_destroy(&queue->cond_variable);
-    free(queue);
+    free_queue(queue);
+
     return 0;
 }
