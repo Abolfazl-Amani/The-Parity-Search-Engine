@@ -14,23 +14,25 @@ typedef struct Queue {
     Node* tail;
     int size;
     pthread_mutex_t mutex_lock;
+    pthread_cond_t cond_variable;
 } Queue;
 
 Queue* create_queue() {
-    Queue *queue = (Queue*) malloc(sizeof(Queue));
+    Queue *q = (Queue*) malloc(sizeof(Queue));
 
-    if(queue == NULL) {
+    if(q == NULL) {
         printf("Memory Allocation Encountered with an Error!\n");
         return NULL;
     }
     
-    queue->head = NULL;
-    queue->tail = NULL;
-    queue->size = 0;
+    q->head = NULL;
+    q->tail = NULL;
+    q->size = 0;
 
-    pthread_mutex_init(&queue->mutex_lock, NULL);
+    pthread_mutex_init(&q->mutex_lock, NULL);
+    pthread_cond_init(&q->cond_variable, NULL);
 
-    return queue;
+    return q;
 }
 
 int empty(Queue* q) {
@@ -50,23 +52,25 @@ void enqueue(Queue* q, char* path) {
     new_node->file_path = strdup(path);
     new_node->next = NULL;
 
-    if(empty(q)) q->head = q->tail = new_node;
+    if(empty(q)){
+        q->head = q->tail = new_node;
+    }
     else {
         q->tail->next = new_node;
         q->tail = new_node;
     }
 
     q->size++;
+
     pthread_mutex_unlock(&q->mutex_lock);
+    pthread_cond_signal(&q->cond_variable);
 }
 
 char* dequeue(Queue* q) {
     pthread_mutex_lock(&q->mutex_lock);
-    if(empty(q)){
-        printf("Can not Modify Queue Because Queue is Empty!\n");
-        pthread_mutex_unlock(&q->mutex_lock);
-        return NULL;
-    }
+
+    while(emtpy(q)) pthread_cond_wait(&q->cond_variable, &q->mutex_lock);
+
     Node* temp_node = q->head;
     if(q->size == 1) {
         q->head = q->tail = NULL;
@@ -79,9 +83,8 @@ char* dequeue(Queue* q) {
 
     free(temp_node);
     pthread_mutex_unlock(&q->mutex_lock);
-    
-    return file_path;
 
+    return file_path;
 }
 
 int main() {
@@ -101,5 +104,9 @@ int main() {
     dequeue(queue);
 
     printf("Size: %d\n", queue->size);
+
+    pthread_mutex_destroy(&queue->mutex_lock);
+    pthread_cond_destroy(&queue->cond_variable);
+    free(queue);
     return 0;
 }
