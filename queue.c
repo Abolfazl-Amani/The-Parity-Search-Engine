@@ -3,6 +3,13 @@
 #include <string.h>
 #include <pthread.h>
 #include <sys/types.h>
+#include <unistd.h>
+#include <sys/wait.h>
+
+int number_of_thread = 3;
+int number_of_child_process = 3;
+int total_matches = 0;
+char buffer[512] = "Error";
 
 typedef struct Node {
     char* file_path;
@@ -23,10 +30,6 @@ typedef struct ThreadArgs {
     int* total_matches;
     pthread_mutex_t matches_lock;
 } ThreadArgs;
-
-int number_of_thread = 3;
-int total_matches = 0;
-char buffer[512] = "Error";
 
 Queue* create_queue() {
     Queue *q = (Queue*) malloc(sizeof(Queue));
@@ -182,40 +185,108 @@ void* worker_function(void* args) {
 }
 
 int main() {
+    int fd[2];
 
-    printf("Creating a Queue\n");
-    Queue* queue = create_queue();
+    if(pipe(fd) < 0) {
+        printf("Error: Failed to Create Pipe!\n");
+        return 1;
+    } 
 
+    const char* test_files[] = {
+        "/home/abolfazl/test_logs/server_log1.txt",
+        "/home/abolfazl/test_logs/server_log2.txt",
+        "/home/abolfazl/test_logs/server_log3.txt",
+        "/home/abolfazl/test_logs/empty_log.txt"
+    };
+    int num_files = 4;
 
-    pthread_t worker[number_of_thread];
+    printf("======================================================\n");
+    printf("Starting Search System with %d Processes & %d Threads/Proc\n", number_of_child_process, number_of_thread);
+    printf("======================================================\n\n");
 
-    ThreadArgs shared_data;
-    shared_data.queue = queue;
-    shared_data.total_matches = &total_matches;
+    for(int j = 0; j < number_of_child_process; j++) {
+        pid_t pid = fork();
+
+        if(pid < 0) {
+            printf("Error: Failed to Create Child Process!\n");
+            return 1;
+        }
+        else if(pid == 0) {
+            // =========================
+            // ===     (Searcher)    ===
+            // =========================
+            close(fd[0]); 
+
+            Queue* queue = create_queue();
+
+            pthread_t worker[number_of_thread];
+            ThreadArgs shared_data;
+            shared_data.queue = queue;
+            shared_data.total_matches = &total_matches;
+            shared_data.target_word = strdup(buffer);
+            pthread_mutex_init(&shared_data.matches_lock, NULL);
+
+            for(int i = 0; i < number_of_thread; i++) {
+                pthread_create(&worker[i], NULL, worker_function, &shared_data);
+            }
+
+            for(int k = 0; k < num_files; k++) {
+                if(k % number_of_child_process == j) {
+                    enqueue(queue, (char*)test_files[k]);
+                }
+            }
+
+            for(int i = 0; i < number_of_thread; i++) {
+                enqueue(queue, "STOP");
+            }
+
+            for(int i = 0; i < number_of_thread; i++) {
+                pthread_join(worker[i], NULL);
+            }
+
+            printf("[Searcher Process %d] Finished. Local Matches: %d\n", j + 1, total_matches);
+
+            int local_matches = total_matches;
+            write(fd[1], &local_matches, sizeof(local_matches));
+
+            close(fd[1]);
+            free((void*)shared_data.target_word);
+            pthread_mutex_destroy(&shared_data.matches_lock);
+            free_queue(queue); 
+            
+            exit(0); 
+        }
+    }
     
-    shared_data.target_word = strdup(buffer);
+    // ==============================
+    // ===        (Manager)       ===
+    // ==============================
+    close(fd[1]); 
 
-    pthread_mutex_init(&shared_data.matches_lock, NULL);
+    int received_matches = 0;
+    int final_grand_total = 0;
 
-    for(int i = 0;i < number_of_thread;i++) {
-        pthread_create(&worker[i], NULL, worker_function, &shared_data);
+    for(int i = 0; i < number_of_child_process; i++) {
+        read(fd[0], &received_matches, sizeof(received_matches));
+        printf("[Manager] Received value from Searcher Process %d: %d\n", i + 1, received_matches);
+        final_grand_total += received_matches;
     }
 
-    for(int i = 0;i < number_of_thread;i++) {
-        enqueue(queue, "STOP");
+    printf("\n======================================================\n");
+    printf("                  FINAL SEARCH REPORT                 \n");
+    printf("======================================================\n");
+    printf("» TARGET WORD        : '%s'\n", buffer);
+    printf("» PROCESSES EMPLOYED : %d Searchers\n", number_of_child_process);
+    printf("» TOTAL TEXT FILES   : %d files\n", num_files);
+    printf("------------------------------------------------------\n");
+    printf("» GRAND TOTAL MATCHES ACCUMULATED : %d\n", final_grand_total);
+    printf("======================================================\n\n");
+
+    close(fd[0]);
+
+    for(int i = 0; i < number_of_child_process; i++) {
+        wait(NULL);
     }
-
-    for(int i = 0;i < number_of_thread;i++) {
-        pthread_join(worker[i], NULL);
-    }
-
-    printf("\n-------------------------------------------------\n");
-    printf("[Searcher Process %d] Finished. Local Matches: %d\n", 1, total_matches);
-    printf("-------------------------------------------------\n");
-
-    free((void*)shared_data.target_word);
-    pthread_mutex_destroy(&shared_data.matches_lock);
-    free_queue(queue);
 
     return 0;
 }
