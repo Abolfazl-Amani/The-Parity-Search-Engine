@@ -13,9 +13,20 @@ typedef struct Queue {
     Node* head;
     Node* tail;
     int size;
-    pthread_mutex_t mutex_lock;
+    pthread_mutex_t queue_lock;
     pthread_cond_t cond_variable;
 } Queue;
+
+typedef struct ThreadArgs {
+    Queue* queue;
+    const char* target_word;
+    int* total_matches;
+    pthread_mutex_t maches_lock;
+} ThreadArgs;
+
+int number_of_thread = 3;
+int total_matches = 0;
+char buffer[512] = "Error";
 
 Queue* create_queue() {
     Queue *q = (Queue*) malloc(sizeof(Queue));
@@ -29,7 +40,7 @@ Queue* create_queue() {
     q->tail = NULL;
     q->size = 0;
 
-    pthread_mutex_init(&q->mutex_lock, NULL);
+    pthread_mutex_init(&q->queue_lock, NULL);
     pthread_cond_init(&q->cond_variable, NULL);
 
     return q;
@@ -40,12 +51,12 @@ int empty(Queue* q) {
 }
 
 void enqueue(Queue* q, char* path) {
-    pthread_mutex_lock(&q->mutex_lock);
+    pthread_queue_lock(&q->queue_lock);
     Node* new_node = (Node*) malloc(sizeof(Node));
 
     if(new_node == NULL) {
         printf("Memory Allocation Encountered with an Error!\n");
-        pthread_mutex_unlock(&q->mutex_lock);
+        pthread_mutex_unlock(&q->queue_lock);
         return;
     }
 
@@ -62,14 +73,14 @@ void enqueue(Queue* q, char* path) {
 
     q->size++;
 
-    pthread_mutex_unlock(&q->mutex_lock);
+    pthread_mutex_unlock(&q->queue_lock);
     pthread_cond_signal(&q->cond_variable);
 }
 
 char* dequeue(Queue* q) {
-    pthread_mutex_lock(&q->mutex_lock);
+    pthread_queue_lock(&q->queue_lock);
 
-    while(empty(q)) pthread_cond_wait(&q->cond_variable, &q->mutex_lock);
+    while(empty(q)) pthread_cond_wait(&q->cond_variable, &q->queue_lock);
 
     Node* temp_node = q->head;
     if(q->size == 1) {
@@ -82,7 +93,7 @@ char* dequeue(Queue* q) {
     char* file_path = temp_node->file_path;
 
     free(temp_node);
-    pthread_mutex_unlock(&q->mutex_lock);
+    pthread_mutex_unlock(&q->queue_lock);
 
     return file_path;
 }
@@ -90,7 +101,7 @@ char* dequeue(Queue* q) {
 void free_queue(Queue* q) {
     if(q == NULL) return;
 
-    pthread_mutex_lock(&q->mutex_lock);
+    pthread_queue_lock(&q->queue_lock);
 
     Node* current_node = q->head;
     while(current_node != NULL) {
@@ -105,11 +116,52 @@ void free_queue(Queue* q) {
     q->head = q->tail = NULL;
     q->size = 0;
 
-    pthread_mutex_unlock(&q->mutex_lock);
+    pthread_mutex_unlock(&q->queue_lock);
 
-    pthread_mutex_destroy(&q->mutex_lock);
+    pthread_mutex_destroy(&q->queue_lock);
     pthread_cond_destroy(&q->cond_variable);
     free(q);
+}
+
+int count_words_in_line(char* line, const char* word) {
+    int count = 0;
+    int word_len = strlen(word);
+
+    char *ptr = strstr(line, word);
+
+    while(ptr != NULL) {
+        count++;
+
+        ptr = strstr(ptr + word_len, word);
+    }
+
+    return count;
+}
+
+int search_into_file(const char* file_path, const char* target_word) {
+    FILE* file = fopen(file_path, "r");
+
+    if(file == NULL) {
+        printf("Error: Could not open file %s\n", file_path);
+        return 0;
+    }
+
+    char line_buffer[65536];
+    int file_matches = 0;
+    while(fgets(line_buffer, sizeof(line_buffer), file)) {
+        file_matches += count_words_in_line(line_buffer, target_word);
+    }
+
+    fclose(file);
+    return file_matches;
+}
+
+void* worker_function(void* args) {
+    ThreadArgs* shared_data = (ThreadArgs*) args;
+    
+    while(1) {
+        
+    }
 }
 
 int main() {
@@ -117,18 +169,32 @@ int main() {
     printf("Creating a Queue\n");
     Queue* queue = create_queue();
 
-    printf("Size: %d\n", queue->size);
+    // printf("Size: %d\n", queue->size);
 
-    printf("Add an Element into Queue\n");
-    enqueue(queue, "Abolfazl-Amani");
+    // printf("Add an Element into Queue\n");
+    // enqueue(queue, "Abolfazl-Amani");
 
-    printf("Add an Element into Queue\n");
-    enqueue(queue, "Hasan-Amani");
+    // printf("Add an Element into Queue\n");
+    // enqueue(queue, "Hasan-Amani");
 
-    printf("Remove an Element in Queue\n");
-    dequeue(queue);
+    // printf("Remove an Element in Queue\n");
+    // dequeue(queue);
 
-    printf("Size: %d\n", queue->size);
+    // printf("Size: %d\n", queue->size);
+
+    pthread_t worker[number_of_thread];
+
+    ThreadArgs* shared_data;
+    shared_data->queue = queue;
+    shared_data->total_matches = &total_matches;
+    
+    shared_data->target_word = strdup(buffer);
+
+    pthread_mutex_init(&shared_data->maches_lock, NULL);
+
+    for(int i = 0;i < number_of_thread;i++) {
+        pthread_create(&worker[i], NULL, worker_function, &shared_data);
+    }
 
     free_queue(queue);
 
