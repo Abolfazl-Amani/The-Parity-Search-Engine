@@ -21,7 +21,7 @@ typedef struct ThreadArgs {
     Queue* queue;
     const char* target_word;
     int* total_matches;
-    pthread_mutex_t maches_lock;
+    pthread_mutex_t matches_lock;
 } ThreadArgs;
 
 int number_of_thread = 3;
@@ -51,7 +51,7 @@ int empty(Queue* q) {
 }
 
 void enqueue(Queue* q, char* path) {
-    pthread_queue_lock(&q->queue_lock);
+    pthread_mutex_lock(&q->queue_lock);
     Node* new_node = (Node*) malloc(sizeof(Node));
 
     if(new_node == NULL) {
@@ -78,7 +78,7 @@ void enqueue(Queue* q, char* path) {
 }
 
 char* dequeue(Queue* q) {
-    pthread_queue_lock(&q->queue_lock);
+    pthread_mutex_lock(&q->queue_lock);
 
     while(empty(q)) pthread_cond_wait(&q->cond_variable, &q->queue_lock);
 
@@ -101,7 +101,7 @@ char* dequeue(Queue* q) {
 void free_queue(Queue* q) {
     if(q == NULL) return;
 
-    pthread_queue_lock(&q->queue_lock);
+    pthread_mutex_lock(&q->queue_lock);
 
     Node* current_node = q->head;
     while(current_node != NULL) {
@@ -160,8 +160,25 @@ void* worker_function(void* args) {
     ThreadArgs* shared_data = (ThreadArgs*) args;
     
     while(1) {
-        
+        char *path = dequeue(shared_data->queue);
+
+        if(strcmp(path, "STOP") == 0 || path == NULL) {
+            if(path != NULL) free(path);
+            break;
+        }
+
+        int local_matches = search_into_file(path, shared_data->target_word);
+
+        pthread_mutex_lock(&shared_data->matches_lock);
+        total_matches += local_matches;
+        pthread_mutex_unlock(&shared_data->matches_lock);
+
+        printf("[Thread %ld] processed %s (Found: %d)\n", pthread_self(), path, local_matches);
+        free(path);
     }
+
+    pthread_exit(NULL);
+
 }
 
 int main() {
@@ -169,33 +186,35 @@ int main() {
     printf("Creating a Queue\n");
     Queue* queue = create_queue();
 
-    // printf("Size: %d\n", queue->size);
-
-    // printf("Add an Element into Queue\n");
-    // enqueue(queue, "Abolfazl-Amani");
-
-    // printf("Add an Element into Queue\n");
-    // enqueue(queue, "Hasan-Amani");
-
-    // printf("Remove an Element in Queue\n");
-    // dequeue(queue);
-
-    // printf("Size: %d\n", queue->size);
 
     pthread_t worker[number_of_thread];
 
-    ThreadArgs* shared_data;
-    shared_data->queue = queue;
-    shared_data->total_matches = &total_matches;
+    ThreadArgs shared_data;
+    shared_data.queue = queue;
+    shared_data.total_matches = &total_matches;
     
-    shared_data->target_word = strdup(buffer);
+    shared_data.target_word = strdup(buffer);
 
-    pthread_mutex_init(&shared_data->maches_lock, NULL);
+    pthread_mutex_init(&shared_data.matches_lock, NULL);
 
     for(int i = 0;i < number_of_thread;i++) {
         pthread_create(&worker[i], NULL, worker_function, &shared_data);
     }
 
+    for(int i = 0;i < number_of_thread;i++) {
+        enqueue(queue, "STOP");
+    }
+
+    for(int i = 0;i < number_of_thread;i++) {
+        pthread_join(worker[i], NULL);
+    }
+
+    printf("\n-------------------------------------------------\n");
+    printf("[Searcher Process %d] Finished. Local Matches: %d\n", 1, total_matches);
+    printf("-------------------------------------------------\n");
+
+    free((void*)shared_data.target_word);
+    pthread_mutex_destroy(&shared_data.matches_lock);
     free_queue(queue);
 
     return 0;
